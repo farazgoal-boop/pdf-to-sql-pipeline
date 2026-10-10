@@ -291,13 +291,22 @@ Tests use a temporary SQLite database and generated PDFs; OCR tests are skipped 
 
 ## Screenshots
 
-Screenshots of the dashboard go in [`docs/screenshots/`](docs/screenshots/).
+The dashboard after importing the three sample PDFs (`python scripts/make_samples.py`).
 
-<!--
-![Dashboard](docs/screenshots/dashboard.png)
+**Overview** – database and OCR status in the sidebar, upload area and totals.
+![Dashboard overview](docs/screenshots/dashboard.png)
+
+**Documents** – one row per PDF with its status, page count and OCR page count.
+![Documents table](docs/screenshots/documents.png)
+
+**Page viewer** – the extracted text of any page; here a scanned invoice read by OCR with 95.1% confidence.
 ![Page viewer](docs/screenshots/page_viewer.png)
-![Search](docs/screenshots/search.png)
--->
+
+**Search** – case-insensitive full-text search across every page, with matches highlighted.
+![Full-text search](docs/screenshots/search.png)
+
+**Export** – download everything as an Excel workbook, or pages and documents as CSV.
+![Export](docs/screenshots/export.png)
 
 ## Known limitations
 
