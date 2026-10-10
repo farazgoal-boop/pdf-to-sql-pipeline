@@ -1,0 +1,10 @@
+pymupdf
+pytesseract
+pillow
+sqlalchemy
+psycopg2-binary
+pymysql
+python-dotenv
+streamlit
+pandas
+pytest
