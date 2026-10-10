@@ -19,11 +19,12 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from app.config import OUTPUT_DIR, SAMPLE_DIR, settings  # noqa: E402
-from app.database import Database  # noqa: E402
+from app.database import Database, to_csv_bytes, to_xlsx_bytes  # noqa: E402
 from app.extractor import check_ocr  # noqa: E402
 from app.pipeline import PipelineSummary, find_pdfs, process_files, setup_logging  # noqa: E402
 
 UPLOAD_DIR = OUTPUT_DIR / "uploads"
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 STATUS_STYLE = {
     "success": "background-color: #e6f4ea; color: #1e6b34; font-weight: 600;",
@@ -122,7 +123,7 @@ with st.sidebar:
     st.markdown("#### Database")
     st.markdown(f"**Type:** `{db.backend}`")
     st.markdown("**Location:**")
-    st.code(db.location if db.backend == "sqlite" else db.masked_url, language=None, wrap_lines=True)
+    st.code(db.display_location, language=None, wrap_lines=True)  # passwords are masked
 
     st.markdown("#### OCR engine")
     if ocr.available:
@@ -192,7 +193,8 @@ docs = db.documents_df()
 tab_docs, tab_viewer, tab_search, tab_export = st.tabs(["Documents", "Page viewer", "Search", "Export"])
 
 with tab_docs:
-    table = docs[["id", "file_name", "status", "page_count", "ocr_page_count", "processed_at", "error_message"]]
+    table = docs[["id", "file_name", "status", "page_count", "ocr_page_count", "processed_at", "error_message"]].copy()
+    table["error_message"] = table["error_message"].fillna("")  # blank instead of "None"
     styled = table.style.map(lambda v: STATUS_STYLE.get(v, ""), subset=["status"])
     st.dataframe(
         styled,
@@ -254,13 +256,24 @@ with tab_search:
         st.caption("Case-insensitive search across the text of every page. Works on SQLite, PostgreSQL and MySQL.")
 
 with tab_export:
-    st.markdown("Download the extracted data as CSV (UTF-8, opens directly in Excel).")
-    pages_csv = db.pages_df().drop(columns=["document_id"]).to_csv(index=False).encode("utf-8-sig")
-    docs_csv = docs.to_csv(index=False).encode("utf-8-sig")
-    e1, e2 = st.columns(2)
+    st.markdown("Download the extracted data. Files are generated when you click.")
+    # Callables are only run on click, so large exports don't slow down every page refresh.
+    e1, e2, e3 = st.columns(3)
     with e1:
-        st.download_button("⬇ All pages (CSV)", pages_csv, "pages.csv", "text/csv", width="stretch", type="primary")
-        st.caption(f"{stats['pages']} rows: file name, page number, method, confidence, text")
+        st.download_button(
+            "⬇ Excel workbook (.xlsx)",
+            lambda: to_xlsx_bytes({"Pages": db.export_pages_df(), "Documents": db.export_documents_df()}),
+            "pdf_data.xlsx", XLSX_MIME, width="stretch", type="primary",
+        )
+        st.caption("Two sheets (Pages, Documents) · wrapped text · frozen header row")
     with e2:
-        st.download_button("⬇ Documents (CSV)", docs_csv, "documents.csv", "text/csv", width="stretch")
+        st.download_button("⬇ All pages (CSV)", lambda: to_csv_bytes(db.export_pages_df()),
+                           "pages.csv", "text/csv", width="stretch")
+        st.caption(f"{stats['pages']} rows: file name, page number, method, confidence, text")
+    with e3:
+        st.download_button("⬇ Documents (CSV)", lambda: to_csv_bytes(db.export_documents_df()),
+                           "documents.csv", "text/csv", width="stretch")
         st.caption(f"{stats['documents']} rows: one per PDF, with status and page counts")
+    st.caption("CSV files are UTF-8 with BOM so Excel opens them correctly; times are UTC "
+               "as YYYY-MM-DD HH:MM:SS. A page longer than 32,767 characters (Excel's cell limit) "
+               "is shortened in the .xlsx only.")

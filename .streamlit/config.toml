@@ -1,0 +1,6 @@
+# Streamlit settings for the dashboard (read when launched from the project root:
+#   streamlit run ui/streamlit_app.py)
+
+[client]
+# Hide developer options such as the "Deploy" button; keep only the basic menu.
+toolbarMode = "minimal"
