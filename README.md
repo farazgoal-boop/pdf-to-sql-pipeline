@@ -61,8 +61,11 @@ Install to the default folder `C:\Program Files\Tesseract-OCR\` — the tool fin
 **3. Get the code and open PowerShell in the project folder**
 
 ```powershell
-cd C:\path\to\pdf-to-sql-pipeline
+git clone https://github.com/farazgoal-boop/pdf-to-sql-pipeline.git
+cd pdf-to-sql-pipeline
 ```
+
+(Or download the ZIP from <https://github.com/farazgoal-boop/pdf-to-sql-pipeline>, extract it, and open PowerShell in that folder.)
 
 **4. Create and activate a virtual environment**
 
