@@ -132,6 +132,19 @@ class Database:
         port = f":{parsed.port}" if parsed.port else ""
         return f"{parsed.host}{port}/{parsed.database}"
 
+    @property
+    def display_location(self) -> str:
+        """Short, safe-to-show location: SQLite path relative to the project, or the masked URL."""
+        if self.backend != "sqlite":
+            return self.masked_url
+        if self.location == ":memory:":
+            return self.location
+        path = Path(self.location)
+        try:
+            return path.relative_to(PROJECT_ROOT.resolve()).as_posix()
+        except ValueError:  # database file lives outside the project
+            return path.as_posix()
+
     # ----------------------------------------------------------------- write
     def find_by_hash(self, file_hash: str) -> Document | None:
         with self.Session() as session:
@@ -232,13 +245,108 @@ class Database:
         with self.engine.connect() as conn:
             return [dict(row._mapping) for row in conn.execute(query)]
 
+    # ---------------------------------------------------------------- export
+    def export_pages_df(self) -> pd.DataFrame:
+        """Every page with its file name and import time, ready for CSV/Excel."""
+        query = (
+            select(
+                Document.file_name,
+                Page.page_number,
+                Page.extraction_method,
+                Page.char_count,
+                Page.ocr_confidence,
+                Document.processed_at,
+                Page.text,
+            )
+            .join(Document, Page.document_id == Document.id)
+            .order_by(Document.id, Page.page_number)
+        )
+        with self.engine.connect() as conn:
+            return _format_timestamps(pd.read_sql(query, conn))
+
+    def export_documents_df(self) -> pd.DataFrame:
+        return _format_timestamps(self.documents_df())
+
     def export_csv(self, path: str | Path) -> int:
-        """Write every page (with its file name) to a UTF-8 CSV that opens cleanly in Excel."""
-        df = self.pages_df().drop(columns=["document_id"])
+        """Write every page to a CSV file that opens cleanly in Excel. Returns the row count."""
+        df = self.export_pages_df()
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(path, index=False, encoding="utf-8-sig")
+        path.write_bytes(to_csv_bytes(df))
         return len(df)
+
+    def export_xlsx(self, path: str | Path) -> int:
+        """Write a workbook with a Pages and a Documents sheet. Returns the page row count."""
+        pages = self.export_pages_df()
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(to_xlsx_bytes({"Pages": pages, "Documents": self.export_documents_df()}))
+        return len(pages)
+
+
+# ---------------------------------------------------------------------- export helpers
+EXCEL_CELL_LIMIT = 32_767  # maximum characters Excel can hold in one cell
+_TRUNCATION_NOTE = " [...truncated for Excel; full text is in the database and CSV export]"
+_WRAPPED_COLUMNS = {"text": 100, "error_message": 60}  # column -> width; wrapped and top-aligned
+
+
+def _format_timestamps(df: pd.DataFrame) -> pd.DataFrame:
+    """Render processed_at as a plain 'YYYY-MM-DD HH:MM:SS' (UTC) string so Excel shows it as-is."""
+    if "processed_at" in df.columns:
+        # Naive values (SQLite, MySQL) are stored in UTC; aware values (PostgreSQL) are converted to UTC.
+        stamps = pd.to_datetime(df["processed_at"], utc=True)
+        df["processed_at"] = stamps.dt.strftime("%Y-%m-%d %H:%M:%S").fillna("")
+    return df
+
+
+def to_csv_bytes(df: pd.DataFrame) -> bytes:
+    """UTF-8 with a byte-order mark, so Excel detects the encoding (accents, €, etc.)."""
+    return df.to_csv(index=False).encode("utf-8-sig")
+
+
+def _excel_safe(value):
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+
+    if not isinstance(value, str):
+        return value
+    value = ILLEGAL_CHARACTERS_RE.sub("", value)
+    if len(value) > EXCEL_CELL_LIMIT:
+        value = value[: EXCEL_CELL_LIMIT - len(_TRUNCATION_NOTE)] + _TRUNCATION_NOTE
+    return value
+
+
+def to_xlsx_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
+    """Build an .xlsx: bold frozen header row, autofilter, sized columns, wrapped long-text columns."""
+    from io import BytesIO
+
+    from openpyxl.styles import Alignment, Font
+    from openpyxl.utils import get_column_letter
+
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        for name, df in sheets.items():
+            df = df.copy()
+            for col in df.columns:
+                if pd.api.types.is_string_dtype(df[col]) or df[col].dtype == object:
+                    df[col] = df[col].map(_excel_safe)
+            df.to_excel(writer, sheet_name=name, index=False)
+
+            ws = writer.sheets[name]
+            ws.freeze_panes = "A2"
+            ws.auto_filter.ref = ws.dimensions
+            for cell in ws[1]:
+                cell.font = Font(bold=True)
+            for idx, col in enumerate(df.columns, start=1):
+                letter = get_column_letter(idx)
+                if col in _WRAPPED_COLUMNS:
+                    ws.column_dimensions[letter].width = _WRAPPED_COLUMNS[col]
+                    wrap = Alignment(wrap_text=True, vertical="top")
+                    for (cell,) in ws.iter_rows(min_row=2, min_col=idx, max_col=idx):
+                        cell.alignment = wrap
+                else:
+                    longest = max([len(str(col))] + [len(str(v)) for v in df[col].head(500) if pd.notna(v)])
+                    ws.column_dimensions[letter].width = min(max(longest + 2, 10), 50)
+    return buffer.getvalue()
 
 
 def generate_schema_sql(path: str | Path = PROJECT_ROOT / "schema.sql") -> Path:

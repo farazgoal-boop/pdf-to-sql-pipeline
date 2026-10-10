@@ -14,8 +14,8 @@ Every page of every PDF becomes one database row holding the file name, page num
 - **Any SQL database** – SQLite out of the box; PostgreSQL and MySQL/MariaDB by changing one line. Tables are created automatically.
 - **Repeatable and safe to re-run** – files are identified by SHA-256 hash, so already-imported files (even renamed copies) are skipped; `--force` re-imports them.
 - **Robust batches** – each PDF is saved in its own transaction. Corrupt, password-protected or empty PDFs are recorded as `failed` with a reason and the batch carries on.
-- **Command-line tool and web UI** – a scriptable CLI for scheduled jobs, and a Streamlit dashboard to upload files, browse pages, search the full text and download CSV.
-- **Logging and exports** – console output plus `output/pipeline.log`; CSV export that opens directly in Excel.
+- **Command-line tool and web UI** – a scriptable CLI for scheduled jobs, and a Streamlit dashboard to upload files, browse pages, search the full text and download Excel or CSV.
+- **Logging and exports** – console output plus `output/pipeline.log`; Excel (.xlsx) export with wrapped text and a frozen header row, and UTF-8 CSV that opens cleanly in Excel.
 - **Tested** – automated tests cover text extraction, OCR, duplicates, force re-processing and corrupt files.
 
 ## How it works
@@ -31,7 +31,7 @@ flowchart LR
     E --> G[Clean text]
     F --> G
     G --> H[(SQL database<br/>documents + pages)]
-    H --> I[CLI stats / CSV export]
+    H --> I[CLI stats / Excel + CSV export]
     H --> J[Streamlit UI<br/>browse · search · download]
     H --> K[Your SQL queries / BI tools]
 ```
@@ -41,7 +41,7 @@ flowchart LR
 | `run.py` | Command-line entry point |
 | `app/config.py` | Settings from `.env` with safe defaults |
 | `app/extractor.py` | Per-page text extraction + OCR fallback + text cleaning |
-| `app/database.py` | SQLAlchemy models, queries, CSV export, `schema.sql` generator |
+| `app/database.py` | SQLAlchemy models, queries, Excel/CSV export, `schema.sql` generator |
 | `app/pipeline.py` | Batch processing, duplicate detection, logging, summary |
 | `ui/streamlit_app.py` | Web dashboard |
 | `scripts/make_samples.py` | Generates three demo PDFs (digital, scanned, mixed) |
@@ -121,6 +121,9 @@ python run.py --input "D:\Client PDFs" --db "postgresql+psycopg2://pdf_user:secr
 # Export every page to CSV after processing
 python run.py --input "D:\Client PDFs" --export-csv output\pages.csv
 
+# Export to Excel without processing anything (sheets: Pages, Documents)
+python run.py --stats --export-xlsx output\pdf_data.xlsx
+
 # Show database statistics only (no processing)
 python run.py --stats
 
@@ -143,7 +146,7 @@ Then open <http://localhost:8501>. From the dashboard you can:
 - see totals (documents, pages, OCR pages, failures) and every document's status,
 - open any page and read its extracted text, extraction method and OCR confidence,
 - search the full text of all pages with highlighted matches,
-- download pages and documents as CSV.
+- download everything as an Excel workbook, or pages and documents as CSV.
 
 The sidebar shows which database is in use (passwords are masked) and whether Tesseract was found.
 
@@ -302,6 +305,7 @@ Screenshots of the dashboard go in [`docs/screenshots/`](docs/screenshots/).
 - A page that has *some* text layer (above `OCR_MIN_CHARS`) plus a scanned image is treated as a text page, so the image part is not OCR'd. Raise `OCR_MIN_CHARS` if your documents look like this.
 - Tables are extracted as plain text lines, not as structured rows and columns.
 - Password-protected PDFs are recorded as failed rather than unlocked.
+- Excel cells hold at most 32,767 characters, so an exceptionally long page is shortened in the `.xlsx` export (marked as truncated). The database and CSV always contain the full text.
 
 ---
 

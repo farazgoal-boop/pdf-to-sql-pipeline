@@ -5,6 +5,7 @@ Examples:
     python run.py --input "D:\\Client PDFs" --recursive
     python run.py --force                          # re-extract files already in the DB
     python run.py --export-csv output/pages.csv    # also export all pages to CSV
+    python run.py --stats --export-xlsx output/pdf_data.xlsx   # export to Excel without processing
     python run.py --stats                          # show what is in the database
 """
 
@@ -137,6 +138,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force", action="store_true", help="re-process files that are already in the database")
     parser.add_argument("--recursive", action="store_true", help="also process PDFs in sub-folders")
     parser.add_argument("--export-csv", metavar="PATH", help="export all extracted pages to a CSV file")
+    parser.add_argument("--export-xlsx", metavar="PATH",
+                        help="export pages and documents to an Excel workbook (.xlsx)")
     parser.add_argument("--stats", action="store_true", help="show database statistics and exit (no processing)")
     parser.add_argument("--write-schema", action="store_true", help="regenerate schema.sql and exit")
     parser.add_argument("-v", "--verbose", action="store_true", help="show detailed log messages on the console")
@@ -162,9 +165,18 @@ def main(argv: list[str] | None = None) -> int:
     print_header(db)
     code = cmd_stats(db) if args.stats else cmd_process(args, db)
 
-    if args.export_csv:
-        rows = db.export_csv(args.export_csv)
-        print(f"\n  Exported {rows} page(s) to {Path(args.export_csv).resolve()}")
+    exports = [(args.export_csv, db.export_csv, "CSV"), (args.export_xlsx, db.export_xlsx, "Excel")]
+    for target, export, label in exports:
+        if not target:
+            continue
+        try:
+            rows = export(target)
+        except PermissionError:
+            print(f"\n  ERROR: cannot write {target} - is it open in Excel? Close it and try again.",
+                  file=sys.stderr)
+            code = code or 1
+            continue
+        print(f"\n  Exported {rows} page(s) to {label}: {Path(target).resolve()}")
     return code
 
 

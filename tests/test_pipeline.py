@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -177,6 +180,49 @@ def test_recursive_option(db: Database, pdf_dir: Path):
 
 def test_export_csv_and_schema(db: Database, pdf_dir: Path, tmp_path: Path):
     process_folder(pdf_dir, db=db)
-    assert db.export_csv(tmp_path / "out" / "pages.csv") == 2
+    csv_path = tmp_path / "out" / "pages.csv"
+    assert db.export_csv(csv_path) == 2
+    raw = csv_path.read_bytes()
+    assert raw.startswith(b"\xef\xbb\xbf")  # UTF-8 BOM so Excel detects the encoding
+    rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8-sig"))))
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", rows[0]["processed_at"])
     schema = generate_schema_sql(tmp_path / "schema.sql").read_text(encoding="utf-8")
     assert "LONGTEXT" in schema and "CREATE TABLE pages" in schema
+
+
+def test_export_xlsx_formatting(db: Database, pdf_dir: Path, tmp_path: Path):
+    openpyxl = pytest.importorskip("openpyxl")
+    process_folder(pdf_dir, db=db)
+    path = tmp_path / "data.xlsx"
+    assert db.export_xlsx(path) == 2
+
+    wb = openpyxl.load_workbook(path)
+    assert wb.sheetnames == ["Pages", "Documents"]
+    ws = wb["Pages"]
+    assert ws.freeze_panes == "A2"
+    headers = [c.value for c in ws[1]]
+    text_col = headers.index("text") + 1
+    letter = openpyxl.utils.get_column_letter(text_col)
+    assert ws.column_dimensions[letter].width == 100
+    assert ws.cell(row=2, column=text_col).alignment.wrap_text
+    stamp = ws.cell(row=2, column=headers.index("processed_at") + 1).value
+    assert isinstance(stamp, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", stamp)
+
+
+def test_excel_cell_limit_is_respected():
+    from app.database import EXCEL_CELL_LIMIT, _excel_safe
+
+    assert len(_excel_safe("x" * 40_000)) == EXCEL_CELL_LIMIT
+    assert _excel_safe("bell\x07char") == "bellchar"
+
+
+def test_display_location_hides_password_and_shortens_sqlite_path(tmp_path: Path, monkeypatch):
+    import app.database as database
+
+    monkeypatch.setattr(database, "PROJECT_ROOT", tmp_path)  # pretend tmp_path is the project
+    inside = Database(f"sqlite:///{(tmp_path / 'output' / 'pdf_data.db').as_posix()}")
+    assert inside.display_location == "output/pdf_data.db"
+    inside.engine.dispose()
+
+    masked = database.mask_url("postgresql+psycopg2://user:secret@db.example.com:5432/pdf_data")
+    assert masked == "postgresql+psycopg2://user:***@db.example.com:5432/pdf_data"
