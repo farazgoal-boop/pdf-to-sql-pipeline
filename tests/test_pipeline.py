@@ -205,6 +205,10 @@ def test_export_xlsx_formatting(db: Database, pdf_dir: Path, tmp_path: Path):
     letter = openpyxl.utils.get_column_letter(text_col)
     assert ws.column_dimensions[letter].width == 100
     assert ws.cell(row=2, column=text_col).alignment.wrap_text
+    for sheet in wb:
+        for row in sheet.iter_rows():
+            for cell in row:
+                assert cell.alignment.vertical == "top", f"{sheet.title}!{cell.coordinate} not top-aligned"
     stamp = ws.cell(row=2, column=headers.index("processed_at") + 1).value
     assert isinstance(stamp, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", stamp)
 

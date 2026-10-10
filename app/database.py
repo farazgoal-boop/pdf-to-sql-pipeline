@@ -334,18 +334,22 @@ def to_xlsx_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
             ws = writer.sheets[name]
             ws.freeze_panes = "A2"
             ws.auto_filter.ref = ws.dimensions
+            top = Alignment(vertical="top")
             for cell in ws[1]:
                 cell.font = Font(bold=True)
+                cell.alignment = top
             for idx, col in enumerate(df.columns, start=1):
                 letter = get_column_letter(idx)
-                if col in _WRAPPED_COLUMNS:
+                wrapped = col in _WRAPPED_COLUMNS
+                if wrapped:
                     ws.column_dimensions[letter].width = _WRAPPED_COLUMNS[col]
-                    wrap = Alignment(wrap_text=True, vertical="top")
-                    for (cell,) in ws.iter_rows(min_row=2, min_col=idx, max_col=idx):
-                        cell.alignment = wrap
                 else:
                     longest = max([len(str(col))] + [len(str(v)) for v in df[col].head(500) if pd.notna(v)])
                     ws.column_dimensions[letter].width = min(max(longest + 2, 10), 50)
+                # Top-align every data cell so short values line up with the start of long wrapped text.
+                data_alignment = Alignment(vertical="top", wrap_text=True) if wrapped else top
+                for (cell,) in ws.iter_rows(min_row=2, min_col=idx, max_col=idx):
+                    cell.alignment = data_alignment
     return buffer.getvalue()
 
 
